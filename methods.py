@@ -2,64 +2,60 @@ from copy import copy
 
 from rest_framework.serializers import HyperlinkedModelSerializer
 
-from .utils import remove_empty, can_be_str
+from .utils import remove_empty, str_match_type, list_or_single_value, check_parse, remove_character
 
 
-def get_key_value_filter(key_values, ns):
-    # Receives {'field1': 'value1|value2', 'field2': 'value3,value4', 'field3': 'value5', 'field4': 'number',
-    #           'pure-field5': any_weird_type_or_pure_value_you_want}
+def get_key_value_filter(key_value, ns):
+    # Receives {'field1': 'value1|value2', 'field2': 'value3,value4', 'field3': 'value5', 'field4': 'number'}
     # Returns this string:  "field1__range": ["value1", "value2"],
     #                       "field2__in": ["value3", "value4"],
     #                       "field3__icontains": "value5",
     #                       "field4": "number",
-    #                       "field5": pure_value_XY  # A variable created in "ns" with the value
-    to_query = ''
-    final_i1 = len(key_values)
-    # Iterate keys-values
-    for i1, (key, values) in enumerate(key_values.items()):
-        range_query = False
+    #                       "field5": value_X  # A variable created in "ns" with the value
+    to_filter = to_exclude = ''
+    final_i = len(key_value)
+    for i, (key, value) in enumerate(key_value.items()):
 
-        pure_query = False
-        if key.startswith('pure-'):
-            pure_query = True
-            key = key.replace('pure-', '')
+        if '.' in key:
+            key = key.replace('.', '__')
 
-        if not isinstance(values, bool) and not isinstance(values, int) and not pure_query:
-            if '|' in values:
-                # Range query case (separator: "|", or Pipe)
-                # Makes "1|2" turn into ["1","2"], "1," into ["1"] and a "length" different of 2 aborts the loop
-                values_list = remove_empty(values.split('|'))
-                if len(values_list) != 2:
-                    continue
-                range_query = True
-            else:
-                # List of values case
-                # Makes "1,2" turn into ["1","2"] and "1," into ["1"]
-                values_list = remove_empty(values.split(','))
+        range_query = False  # Also filters boolean indirectly
+
+        is_str = isinstance(value, str)
+        is_bool = False if is_str else isinstance(value, bool)
+
+        if isinstance(value, str):
+            # Range query case: "|", or Pipe
+            # Multi value case: ",", or Comma
+            # "value1|value2" or "value1,value2" turn into ["value1","value2"];
+            # "value1," or "value1|" into ["1"]
+            value = list_or_single_value(value, '|' if '|' in value else ',')
+            if isinstance(value, list):
+                is_str = is_bool = False
+            range_query = False if is_bool or is_str or len(value) != 2 else True
+
+        value = check_parse(value)
+
+        # Or use the types of match queries ("contains", "startswith" etc.) or "range query"
+        match_type, value = str_match_type(value) if not range_query else [False, value]
+        # Set the name of the variable for exec's namespace
+        ns_value = 'value_%s' % i
+        # Handle single and multiple values mounting single query or "__in"/"__range" with a list
+        key_value_string = (('"' + key +
+                             ('__' + match_type if match_type else
+                              ('__range' if range_query else
+                               ('__in' if isinstance(value, list) else ''))) +
+                             '": ' + ns_value +
+                             (', ' if i + 1 != final_i else '')))
+
+        if not is_bool and is_str and value.startswith('-'):
+            value = remove_character(value, 'first')
+            to_exclude += key_value_string
         else:
-            values_list = values
-
-        is_bool = isinstance(values_list, bool)
-        is_int = isinstance(values_list, int)
-        final_i2 = 1 if is_bool or pure_query or is_int else len(values_list)
-        # Iterate list of values
-        for i2, a_value in ([[0, values_list]] if is_bool or is_int or pure_query else enumerate(values_list)):
-            if pure_query:
-                key_a_value = 'pure_value_' + str(i1) + str(i2)
-                ns.update({key_a_value: a_value})
-            # Or "like query" or "range query", not both
-            like_query = can_be_str(a_value) if not pure_query and not range_query and not is_bool else False
-            # Handle single and multiple values mounting single query or "__in"/"__range" with a list
-            to_query += (('"' + key +
-                          ('__icontains": ' if like_query else
-                           ('__range": ' if range_query else
-                            ('__in": ' if final_i2 > 1 and not pure_query else '": '))) if i2 == 0 else '') +
-                         ('[' if i2 == 0 and final_i2 > 1 else '') +
-                         (str(a_value) if is_bool or is_int
-                          else ('"' + a_value + '"' if not pure_query else key_a_value)) +
-                         (']' if final_i2 == i2 + 1 and final_i2 > 1 else '') +
-                         (', ' if i2 + 1 != final_i2 or i1 + 1 != final_i1 else ''))
-    return to_query
+            to_filter += key_value_string
+        # Assign the value to the variable in namespace
+        ns.update({ns_value: value})
+    return to_filter, to_exclude
 
 
 def set_serializer(instance, request):
@@ -111,10 +107,10 @@ def serializer_factory(model=None, base=HyperlinkedModelSerializer, fields=None,
         class_name = model.__name__ + 'Serializer'
     else:
         class_name = 'CustomSerializer'
-    return type(base)(class_name, (base,), {'Meta': Meta, })
+    return type(base)(class_name, (base,), {'Meta': Meta,})
 
 
-def filter_selected_fields(query_params, selected_fields):
+def select_fields(query_params, selected_fields):
     if selected_fields:
         dont_filter, do_filter = [], []
         for selected_field in selected_fields:  # Mount both selected and not selected fields
@@ -130,3 +126,26 @@ def filter_selected_fields(query_params, selected_fields):
                     del query_params[key]
 
     return query_params
+
+
+def filter_fields(objects: list, query_params):
+    raw_fields = remove_empty(query_params['fields'].split(',')) if 'fields' in query_params else []
+
+    result, exclude, fields = [], [], []
+
+    for field in raw_fields:
+        if field.startswith('-'):
+            exclude.append(field.replace('-', ''))
+        else:
+            fields.append(field)
+
+    for obj in objects:
+        filtered_fields = {} if fields else obj.copy()
+        for key, value in obj.items():
+            if key in fields:
+                filtered_fields[key] = obj[key]
+            elif key in exclude and not fields:
+                del filtered_fields[key]
+        result.append(filtered_fields)
+
+    return result

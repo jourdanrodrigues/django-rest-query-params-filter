@@ -2,7 +2,7 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.response import Response
 
 from rest_framework import serializers
-from .methods import set_serializer, get_key_value_filter, filter_selected_fields
+from .methods import set_serializer, get_key_value_filter, select_fields
 from .utils import mix_dicts_self_params, takeoff_list, remove_empty
 
 
@@ -75,7 +75,7 @@ class UrlFilterModelViewSet(ModelViewSet):
         if 'exclude' in query_params:
             del query_params['exclude']
 
-        query_params = filter_selected_fields(query_params, selected_fields)
+        query_params = select_fields(query_params, selected_fields)
 
         quantity = True if query_params.pop('quantity', 'false').lower() == 'true' else None
 
@@ -96,16 +96,6 @@ class UrlFilterModelViewSet(ModelViewSet):
 
         order_by_opts = query_params.pop('order_by', None)
         distinct_opts = query_params.pop('distinct', None)
-
-        # if exclude_opts and not field_opts:
-        #     to_exclude = get_key_value_filter(exclude_opts)
-        #     # Empty params case (e.g. "?field1=&field2=")
-        #     if to_exclude:
-        #         to_exclude = '.exclude(**{' + to_exclude + '})'
-        #     # Final: .filter(**{"field1__icontains": "value1",
-        #     #                   "field2__in": ["value2", "value3"],
-        #     #                   "field3__range": ["value4", "value5"],
-        #     #                   "field4": "value6"})
 
         if isinstance(distinct_opts, str):  # Allow empty params
             # Example: ?distinct=field
@@ -133,16 +123,16 @@ class UrlFilterModelViewSet(ModelViewSet):
         if len(query_params):  # fields to filter
             if priority_perform == 'params':
                 perform = query_params.pop('perform', perform)
-            to_filter = get_key_value_filter(query_params, ns)
+            to_filter, to_exclude = get_key_value_filter(query_params, ns)
             # Empty params case (e.g. "?field1=&field2=")
             if to_filter:
-                to_filter = '.%s(**{%s})' % (perform, to_filter)
+                to_filter = (('.%s(**{%s})' % (perform, to_filter)) +
+                             (('.exclude(**{%s})' % to_exclude) if to_exclude and perform == 'filter' else ''))
 
         # Mount query options in the string
-        query_opts = '{distinct}{exclude}{filter}'.format(**{
+        query_opts = '{distinct}{filter}'.format(**{
             'distinct': (distinct if distinct else ''),
-            'filter': (to_filter if to_filter else ''),
-            'exclude': (to_exclude if to_exclude else '')
+            'filter': (to_filter if to_filter else '')
         })
 
         # Mount the code in string to execute
