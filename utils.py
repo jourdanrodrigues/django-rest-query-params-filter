@@ -1,5 +1,6 @@
-import re
+from re import match
 from copy import copy
+from django.utils.dateparse import parse_datetime, parse_date
 
 
 def mix_dicts_self_params(self: dict, params: dict, priority='params'):
@@ -29,6 +30,9 @@ def str_match_type(string: str):
                     raise ValueError  # Check if can be boolean
             except ValueError:
                 can_be_str = True
+    except TypeError:
+        pass
+
     if can_be_str:
         if string.startswith('i-'):
             cs = True
@@ -110,26 +114,26 @@ def remove_character(string: str, pos):
 
 
 def check_parse(values):
-    t_int = 'int'
-    t_float = 'float'
-    t_date = 'date'
-    is_list = isinstance(values, list)
-    is_bool = isinstance(values, bool) if not is_list else False
+    t_int, t_float, t_date, t_datetime = 'i', 'f', 'd', 'dt'
+    is_str = isinstance(values, str)
+    is_list = isinstance(values, list) if not is_str else False
 
-    if not is_bool:
+    if is_list or is_str:
         if not is_list:
             values = [values]
 
         for i, value in enumerate(values):
-            if value.startswith('p-'):
+            if isinstance(value, str) and value.startswith('p-'):
                 value = value.replace('p-', '')
                 if value.startswith(t_int + '-'):
                     values[i] = int(value.replace(t_int + '-', ''))
                 elif value.startswith(t_float + '-'):
                     values[i] = float(value.replace(t_float + '-', ''))
-                elif value.startswith(t_date + '-'):
-                    # YYYY-mm-ddTHH:MM(+ anything) | Example: 2016-02-13T17:23:46.030000Z and 2016-02-13T17:23
-                    values[i] = re.match('[0-9]{4}(-[0-9]{2}){2} [0-9]{2}:[0-9]{2}',
-                                         value.replace(t_date + '-', '').replace('T', ' ')).group(0)
+                elif value.startswith(t_date + '-') or value.startswith(t_datetime + '-'):
+                    # YYYY-mm-dd(T| )HH:MM(+ anything) | Example: 2016-02-13T17:23:46.030000Z and 2016-02-13T17:23
+                    date = match('[0-9]{4}(-[0-9]{2}){2}(\s[0-9]{2}:[0-9]{2}((:[0-9]+)?(\.[0-9]+)?Z?)?)?',
+                                 value.replace(t_datetime + '-', '')
+                                 .replace(t_date + '-', '').replace('T', ' ')).group(0)
+                    values[i] = parse_datetime(date) if value.startswith(t_datetime + '-') else parse_date(date)
 
-    return values if is_list or is_bool else values[0]
+    return values if is_list or not is_str else values[0]

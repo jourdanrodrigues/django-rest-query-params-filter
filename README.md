@@ -2,7 +2,7 @@
 
 [![pypi-version]][pypi]
 
-Version 1.3.0 published 14/02/2016 (DD/MM/YYYY)
+Version 1.3.1 published 19/02/2016 (DD/MM/YYYY)
 
 This was my first ever package that I published on PyPI. It is awful in terms of implementation. Keeping it for history purposes.
 
