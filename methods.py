@@ -95,10 +95,13 @@ def serializer_factory(model=None, base=HyperlinkedModelSerializer, fields=None,
             del base.Meta.exclude
         attrs.update({'fields': fields})
     if exclude and not fields:
-        fields = list(base.Meta.fields)
-        for field in exclude:
-            fields.remove(field)
-        attrs.update({'fields': tuple(fields)})
+        if hasattr(base.Meta, 'fields'):
+            fields = list(base.Meta.fields)
+            for field in exclude:
+                fields.remove(field)
+            attrs.update({'fields': tuple(fields)})
+        else:
+            attrs.update({'exclude': exclude})
 
     parent = (object,)
     if hasattr(base, 'Meta'):

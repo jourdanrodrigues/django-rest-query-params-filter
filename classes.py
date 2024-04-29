@@ -17,7 +17,7 @@ class UrlFilterModelViewSet(ModelViewSet):
     serializer_base = {}  # example: {'model': Class, 'base': ClassSerializer}
 
     def list(self, request, *args, **kwargs):
-        quantity = 'quantity' in request.query_params
+        quantity = request.query_params.get('quantity', 'false').lower() == 'true'
         many = not quantity
         self.serializer_class = CountSerializer if quantity else set_serializer(self, request)
         filtered_list = self.qp_filter(self.queryset, request)
@@ -77,7 +77,7 @@ class UrlFilterModelViewSet(ModelViewSet):
 
         query_params = filter_selected_fields(query_params, selected_fields)
 
-        quantity = True if query_params.pop('quantity', None) == 'true' else None
+        quantity = True if query_params.pop('quantity', 'false').lower() == 'true' else None
 
         # Need to take it off query_params to have no effect at "len(query_params)", so I used "raw_perform"
         raw_perform = query_params.pop('perform', None)
