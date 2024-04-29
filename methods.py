@@ -58,8 +58,12 @@ def get_key_value_filter(key_value, ns):
     return to_filter, to_exclude
 
 
-def set_serializer(instance, request=None, fields=[]):
-    if 'base' in instance.serializer_base or instance.serializer_class:
+def set_serializer(instance=None, request=None, serializer=None, fields=[]):
+    if (serializer or
+            # Valid "serializer_class"
+            (hasattr(instance, 'serializer_class') and instance.serializer_class) or
+            # Valid "serializer_base" with a serializer class as value for attribute "base"
+            (hasattr(instance, 'serializer_base') and 'base' in instance.serializer_base)):
         to_fields, to_exclude, raw_fields = [], [], []
         if request and 'fields' in request.query_params:
             raw_fields += remove_empty(request.query_params['fields'].split(','))
@@ -67,16 +71,20 @@ def set_serializer(instance, request=None, fields=[]):
             raw_fields += fields
         for raw_field in raw_fields:
             if raw_field.startswith('-'):
-                to_exclude.append(raw_field.replace('-', ''))
+                to_exclude.append(remove_character(raw_field, 'first'))
             else:
                 to_fields.append(raw_field)
-
-        instance.serializer_class = serializer_factory(model=(None if 'model' not in instance.serializer_base
-                                                              else instance.serializer_base['model']),
-                                                       # "base" is priority here
-                                                       base=(instance.serializer_class
-                                                             if 'base' not in instance.serializer_base
-                                                             else instance.serializer_base['base']),
+        if not instance:
+            instance = type('EmptyClass', (), {'serializer_class': None})()
+        instance.serializer_class = serializer_factory(model=(instance.serializer_base['model']
+                                                              if (hasattr(instance, 'serializer_base') and
+                                                                  'model' in instance.serializer_base)
+                                                              else None),
+                                                       # "base" is priority here, but under "serializer"
+                                                       base=(serializer if serializer
+                                                             else (instance.serializer_class
+                                                                   if 'base' not in instance.serializer_base
+                                                                   else instance.serializer_base['base'])),
                                                        fields=tuple(to_fields), exclude=tuple(to_exclude))
     # assign it to "self.serializer_class"
     return instance.serializer_class
