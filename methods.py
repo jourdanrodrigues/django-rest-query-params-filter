@@ -24,7 +24,7 @@ def get_key_value_filter(key_value, ns):
         is_str = isinstance(value, str)
         is_bool = False if is_str else isinstance(value, bool)
 
-        if isinstance(value, str):
+        if is_str:
             # Range query case: "|", or Pipe
             # Multi value case: ",", or Comma
             # "value1|value2" or "value1,value2" turn into ["value1","value2"];
@@ -44,7 +44,7 @@ def get_key_value_filter(key_value, ns):
         key_value_string = (('"' + key +
                              ('__' + match_type if match_type else
                               ('__range' if range_query else
-                               ('__in' if isinstance(value, list) else ''))) +
+                               ('__in' if 'list' in value.__class__.__name__.lower() else ''))) +
                              '": ' + ns_value +
                              (', ' if i + 1 != final_i else '')))
 
@@ -58,16 +58,18 @@ def get_key_value_filter(key_value, ns):
     return to_filter, to_exclude
 
 
-def set_serializer(instance, request):
+def set_serializer(instance, request=None, fields=[]):
     if 'base' in instance.serializer_base or instance.serializer_class:
-        fields, exclude, raw_fields = [], [], []
-        if 'fields' in request.query_params:
-            raw_fields = remove_empty(request.query_params['fields'].split(','))
+        to_fields, to_exclude, raw_fields = [], [], []
+        if request and 'fields' in request.query_params:
+            raw_fields += remove_empty(request.query_params['fields'].split(','))
+        elif fields:
+            raw_fields += fields
         for raw_field in raw_fields:
             if raw_field.startswith('-'):
-                exclude.append(raw_field.replace('-', ''))
+                to_exclude.append(raw_field.replace('-', ''))
             else:
-                fields.append(raw_field)
+                to_fields.append(raw_field)
 
         instance.serializer_class = serializer_factory(model=(None if 'model' not in instance.serializer_base
                                                               else instance.serializer_base['model']),
@@ -75,13 +77,13 @@ def set_serializer(instance, request):
                                                        base=(instance.serializer_class
                                                              if 'base' not in instance.serializer_base
                                                              else instance.serializer_base['base']),
-                                                       fields=tuple(fields), exclude=tuple(exclude))
+                                                       fields=tuple(to_fields), exclude=tuple(to_exclude))
     # assign it to "self.serializer_class"
     return instance.serializer_class
 
 
 def serializer_factory(model=None, base=HyperlinkedModelSerializer, fields=None, exclude=None, order_by=None):
-    # Source for this f***ing solution: http://stackoverflow.com/a/27468982/4694834
+    # Source for this solution: http://stackoverflow.com/a/27468982/4694834
     attrs = {}
     if model:
         attrs.update({'model': model})
@@ -102,12 +104,8 @@ def serializer_factory(model=None, base=HyperlinkedModelSerializer, fields=None,
     parent = (object,)
     if hasattr(base, 'Meta'):
         parent = (base.Meta, object)
-    Meta = type('Meta', parent, attrs)
-    if model:
-        class_name = model.__name__ + 'Serializer'
-    else:
-        class_name = 'CustomSerializer'
-    return type(base)(class_name, (base,), {'Meta': Meta,})
+    class_name = model.__name__ + 'Serializer' if model else (base.__name__ if base else 'CustomSerializer')
+    return type(base)(class_name, (base,), {'Meta': type('Meta', parent, attrs)})
 
 
 def select_fields(query_params, selected_fields):

@@ -45,28 +45,15 @@ class UrlFilterModelViewSet(ModelViewSet):
         :return: filtered query, or default if there's no query params
         """
 
-        default_filter = mix_dicts_self_params(self=self.default_filter, params=default_filter,
-                                               priority=priority_filter)
+        default_filter = mix_dicts_self_params(self.default_filter, default_filter, priority_filter)
 
         if not len(request.query_params) and not default_filter:  # if there's nothing to filter, return all
             return query_obj.all()
 
         aliases = mix_dicts_self_params(self=self.aliases, params=aliases, priority=priority_aliases)
 
-        query_params = takeoff_list(dict(request.query_params))  # make it clean and editable
-        # For URL query params take priority
-        if priority_filter == 'params':
-            default_filter.update(query_params)
-            query_params = default_filter
-        elif priority_filter == 'self':
-            query_params.update(default_filter)
-
-        # # if "id" is single value, load "/<id>" with same parameters
-        # # uncomment this if you don't have "ad-hoc methods" or if you know what you're doing
-        # single_id = single_value(query_params['id'])
-        # if single_id:
-        #     params = url_encoder(query_params)
-        #     return redirect(request.path + '/' + query_params['id'] + ('?' + params if params else ''))
+        # Mix the "default_filter" with the "query_params" treated from request, based on the "priority_filter"
+        query_params = mix_dicts_self_params(default_filter, takeoff_list(dict(request.query_params)), priority_filter)
 
         ns = {'result_query': None, 'query_set': query_obj}  # namespace for exec
 
@@ -83,10 +70,8 @@ class UrlFilterModelViewSet(ModelViewSet):
         raw_perform = query_params.pop('perform', None)
         if priority_perform == 'params' and raw_perform:
             perform = raw_perform
-        else:
-            del raw_perform
 
-        distinct = to_exclude = to_filter = order_by = None
+        distinct = to_filter = order_by = None
 
         if aliases:
             # aliases example: {'key_to_show1': 'key_to_search1', 'key_to_show2': 'key_to_search2'}
